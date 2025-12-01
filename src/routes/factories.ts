@@ -35,7 +35,10 @@ const categoryService = new CategoryService(categoryRepo);
 const storeService = new StoreService(storeRepo);
 const productService = new ProductService(productRepo);
 const cartService = new CartService(cartRepo, productRepo);
-const paymentService = new PaymentService(orderRepo);
+
+// 🔥 Atualizado: Injeção do productRepo no PaymentService para controle de estoque
+const paymentService = new PaymentService(orderRepo, productRepo);
+
 const orderService = new OrderService(
   orderRepo,
   cartRepo,

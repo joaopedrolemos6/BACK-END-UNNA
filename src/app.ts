@@ -1,49 +1,63 @@
-import express from 'express';
-import cors from 'cors';
+import express from "express";
+import cors from "cors";
+import helmet from "helmet"; // Importante para headers de segurança
+import "express-async-errors"; // Garante que erros async sejam capturados pelo middleware
+import path from "path"; // <--- ADICIONADO: Necessário para caminhos de pastas
 
-import { corsOptions, securityHeaders } from './config/security';
-import { rateLimiter } from './middlewares/rateLimiter';
-import { router } from './routes';
+import { router } from "./routes";
+import { errorHandler } from "./middlewares/errorHandler";
+import { notFoundHandler } from "./middlewares/notFoundHandler";
+import { env } from "./config/env";
+import { apiRateLimiter, corsOptions, securityHeaders } from "./config/security"; // Importando suas configs
 
-import { notFoundHandler } from './middlewares/notFoundHandler';
-import { errorHandler } from './middlewares/errorHandler';
+const app = express();
 
-import { mercadoPagoRoutes } from "./routes/mercadopago.routes";
+// ==========================================================
+// 1. MIDDLEWARES DE SEGURANÇA (Ordem importa!)
+// ==========================================================
 
+// Helmet adiciona headers HTTP de segurança (X-Content-Type-Options, X-Frame-Options, etc)
+// Usando a configuração do seu arquivo security.ts se for middleware, ou direto do helmet()
+// OBS: Para servir imagens, as vezes o Helmet bloqueia carregamento cross-origin (CORP).
+// Se as imagens não carregarem no front, precisaremos ajustar a policy do helmet.
+app.use(helmet({
+  crossOriginResourcePolicy: false, // Permite carregar imagens de outros domínios/locais se necessário
+}));
 
-export const app = express();
+// CORS restringe quem pode chamar sua API
+app.use(cors(corsOptions));
 
-// Necessário para ngrok, cloudflare, vercel, proxies etc.
-app.set("trust proxy", 1);
+// Rate Limiter protege contra força bruta e DDoS simples
+// Aplicamos apenas nas rotas /api para não bloquear arquivos estáticos se houver
+app.use("/api", apiRateLimiter);
 
-// ============================================================
-// ⚠️ IMPORTANTE
-// NÃO coloque express.raw() globalmente
-// O Mercado Pago raw body já está configurado DENTRO das rotas.
-// ============================================================
-
-// JSON normal
-app.use(express.json({ limit: "10mb" }));
+// ==========================================================
+// 2. PARSERS DE CORPO DE REQUISIÇÃO
+// ==========================================================
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Segurança e middlewares globais
-app.use(cors(corsOptions));
-app.use(securityHeaders);
-app.use(rateLimiter);
+// ==========================================================
+// 3. ARQUIVOS ESTÁTICOS (IMAGENS)
+// ==========================================================
+// Torna a pasta 'uploads' pública na URL /uploads
+// Exemplo: http://localhost:3333/uploads/minha-foto.jpg
+app.use("/uploads", express.static(path.resolve(__dirname, "..", "uploads")));
 
-// ============================================================
-// ROTAS DO MERCADO PAGO — precisam vir ANTES do router principal
-// pois usam RAW BODY e um fluxo diferente de validação
-// ============================================================
-app.use("/api/mercadopago", mercadoPagoRoutes);
+// ==========================================================
+// 4. ROTAS
+// ==========================================================
+// Prefixo /api para versionamento e organização
+app.use("/api", router);
 
-// ============================================================
-// ROTAS NORMAIS DA API
-// ============================================================
-app.use('/api', router);
-
-// 404
+// ==========================================================
+// 5. TRATAMENTO DE ERROS
+// ==========================================================
+// Middleware para rotas não encontradas (404)
 app.use(notFoundHandler);
 
-// Handler de erros (sempre por último)
+// Middleware global de erros (Zod, AppError, etc)
+// DEVE ser o último app.use()
 app.use(errorHandler);
+
+export { app };

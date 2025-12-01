@@ -2,117 +2,156 @@ import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 import { env } from "../config/env";
 import { Order, OrderItem, PaymentStatus, OrderStatus } from "../entities/Order";
 import { IOrderRepository } from "../repositories/interfaces/IOrderRepository";
+import { IProductRepository } from "../repositories/interfaces/IProductRepository"; // Import novo
 import { AppError } from "../errors/AppError";
 
 export class PaymentService {
   private client: MercadoPagoConfig;
   private preferenceClient: Preference;
-  private paymentClient: Payment;
+  public paymentClient: Payment;
 
-  constructor(private orderRepository: IOrderRepository) {
+  // Injetamos também o ProductRepository agora
+  constructor(
+    private orderRepository: IOrderRepository,
+    private productRepository: IProductRepository 
+  ) {
+    if (!env.MP_ACCESS_TOKEN) {
+      throw new Error("MP_ACCESS_TOKEN não configurado.");
+    }
     this.client = new MercadoPagoConfig({ accessToken: env.MP_ACCESS_TOKEN });
     this.preferenceClient = new Preference(this.client);
     this.paymentClient = new Payment(this.client);
   }
 
+  // ==========================================================
+  // 1. CRIAR PREFERÊNCIA DE PAGAMENTO
+  // ==========================================================
   async createMercadoPagoPreference(
     order: Order,
     items: OrderItem[],
-    customer: {
-      fullName: string;
-      email: string;
-      phone: string;
-    }
+    customer: { fullName: string; email: string; phone: string }
   ) {
-    const notificationUrl = `${env.APP_URL}/api/payments/mercadopago/webhook?secret=${env.MP_WEBHOOK_SECRET}`;
+    const notificationUrl = `${env.API_URL}/api/payments/mercadopago/webhook`;
 
-    const body: any = {
+    const body = {
       external_reference: order.orderNumber,
       payer: {
         name: customer.fullName,
-        email: customer.email
+        email: customer.email,
       },
       items: items.map((item) => ({
         id: String(item.productId),
         title: item.productNameSnapshot,
         quantity: item.quantity,
         currency_id: "BRL",
-        unit_price: item.unitPrice
+        unit_price: Number(item.unitPrice)
       })),
       back_urls: {
-        success: `${env.APP_URL}/payment/success`,
-        failure: `${env.APP_URL}/payment/failure`,
-        pending: `${env.APP_URL}/payment/pending`
+        success: `${env.APP_URL}/checkout/success?order=${order.orderNumber}`,
+        failure: `${env.APP_URL}/checkout/failure`,
+        pending: `${env.APP_URL}/checkout/pending`
       },
       auto_return: "approved",
-      notification_url: notificationUrl
+      notification_url: notificationUrl,
+      statement_descriptor: "UNNA E-COMMERCE",
     };
 
-    const preference = await this.preferenceClient.create({ body });
+    try {
+      const preference = await this.preferenceClient.create({ body });
 
-    const preferenceId = preference.id as string | undefined;
-    const initPoint = preference.init_point as string | undefined;
+      if (!preference.id || !preference.init_point) {
+        throw new AppError("Falha ao obter ID da preferência do Mercado Pago", 502);
+      }
 
-    if (!preferenceId || !initPoint) {
-      throw new AppError("Failed to create Mercado Pago preference", 500);
+      await this.orderRepository.updateMercadoPagoPreference(order.id, preference.id);
+
+      return {
+        preferenceId: preference.id,
+        initPoint: preference.init_point,
+        sandboxInitPoint: preference.sandbox_init_point
+      };
+    } catch (error: any) {
+      console.error("Erro ao criar preferência no MP:", error);
+      const errorMsg = error.cause?.description || error.message;
+      throw new AppError(`Erro no pagamento: ${errorMsg}`, 500);
     }
-
-    // salvar preference_id no pedido
-    await this.orderRepository.updateMercadoPagoPreference(order.id, preferenceId);
-
-    return {
-      preferenceId,
-      initPoint
-    };
   }
 
-  async handleMercadoPagoWebhook(payload: any) {
-    const { type, data } = payload;
+  // ==========================================================
+  // 2. PROCESSAR NOTIFICAÇÃO (WEBHOOK)
+  // ==========================================================
+  async handleMercadoPagoWebhook(paymentId: string) {
+    try {
+      console.log(`🔄 Consultando pagamento ${paymentId} no Mercado Pago...`);
+      
+      const payment = await this.paymentClient.get({ id: paymentId });
+      
+      if (!payment) {
+        throw new AppError("Pagamento não encontrado no Mercado Pago", 404);
+      }
 
-    if (!type || !data?.id) {
-      throw new AppError("Invalid Mercado Pago webhook payload", 400);
+      const status = payment.status;
+      const orderNumber = payment.external_reference;
+
+      if (!orderNumber) {
+        console.warn("⚠ Pagamento sem external_reference (Order Number). Ignorando.");
+        return;
+      }
+
+      console.log(`📄 Pedido associado: ${orderNumber} | Status MP: ${status}`);
+
+      // 1. Buscar PEDIDO COMPLETO (incluindo itens)
+      const fullOrder = await this.orderRepository.findFullOrderByNumber(orderNumber);
+      
+      if (!fullOrder) {
+        throw new AppError(`Pedido ${orderNumber} não encontrado no sistema.`, 404);
+      }
+
+      const { order, items } = fullOrder;
+
+      let internalStatus: OrderStatus = order.status;
+      let paymentStatus: PaymentStatus = order.paymentStatus;
+
+      if (status === 'approved') {
+        internalStatus = 'PAID'; 
+        paymentStatus = 'PAID';
+      } else if (status === 'rejected' || status === 'cancelled') {
+        internalStatus = 'CANCELLED';
+        paymentStatus = 'FAILED';
+      } else if (status === 'refunded' || status === 'charged_back') {
+        paymentStatus = 'REFUNDED'; 
+      } else if (status === 'in_process' || status === 'pending') {
+         internalStatus = 'PENDING';
+         paymentStatus = 'PENDING';
+      }
+
+      // 2. VERIFICAR SE PRECISA BAIXAR ESTOQUE
+      // Só baixamos se o pedido acabou de ser PAGO e antes não estava PAGO
+      if (paymentStatus === 'PAID' && order.paymentStatus !== 'PAID') {
+          console.log("📉 Pagamento aprovado! Iniciando baixa de estoque...");
+          for (const item of items) {
+             if (item.productVariantId) {
+               await this.productRepository.decreaseStock(item.productVariantId, item.quantity);
+               console.log(`   - Item ${item.productNameSnapshot}: -${item.quantity} un.`);
+             }
+          }
+      }
+
+      // 3. Atualizar status no banco
+      if (order.paymentStatus !== paymentStatus || order.status !== internalStatus) {
+        await this.orderRepository.updatePaymentStatus(order.id, {
+          status: internalStatus,
+          paymentStatus: paymentStatus,
+          mercadoPagoPaymentId: String(paymentId)
+        });
+        console.log(`✅ Pedido ${orderNumber} atualizado para: ${internalStatus}`);
+      } else {
+        console.log(`ℹ O status do pedido ${orderNumber} já está atualizado.`);
+      }
+
+    } catch (error: any) {
+      console.error("Erro ao processar webhook no Service:", error);
+      throw new AppError(error.message || "Erro interno no webhook", error.statusCode || 500);
     }
-
-    if (type !== "payment") {
-      // ignorar outros tipos (merchant_order, etc) por enquanto
-      return;
-    }
-
-    const paymentId = data.id;
-
-    // Buscar o pagamento no MP
-    const payment = await this.paymentClient.get({ id: paymentId });
-
-    const status = (payment as any).status as string;
-    const externalReference = (payment as any).external_reference as string | undefined;
-
-    if (!externalReference) {
-      throw new AppError("Payment without external_reference", 400);
-    }
-
-    const order = await this.orderRepository.findByOrderNumber(externalReference);
-    if (!order) {
-      throw new AppError("Order not found for this payment", 404);
-    }
-
-    let orderStatus: OrderStatus = "PENDING";
-    let paymentStatus: PaymentStatus = "PENDING";
-
-    if (status === "approved") {
-      orderStatus = "PAID";
-      paymentStatus = "PAID";
-    } else if (status === "rejected" || status === "cancelled") {
-      orderStatus = "CANCELLED";
-      paymentStatus = "FAILED";
-    } else if (status === "in_process" || status === "pending") {
-      orderStatus = "PENDING";
-      paymentStatus = "PENDING";
-    }
-
-    await this.orderRepository.updatePaymentStatus(order.id, {
-      status: orderStatus,
-      paymentStatus,
-      mercadoPagoPaymentId: String(paymentId)
-    });
   }
 }

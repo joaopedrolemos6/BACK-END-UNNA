@@ -1,11 +1,17 @@
 import { Router } from "express";
-import { authController } from "./factories";
-import { refreshTokenHandler } from "../middlewares/refreshToken";
+import { AuthController } from "../controllers/AuthController";
+import { AuthService } from "../services/AuthService";
+import { UserRepository } from "../repositories/mysql/UserRepository";
 
-const router = Router();
+const authRoutes = Router();
 
-router.post("/register", authController.register);
-router.post("/login", authController.login);
-router.post("/refresh", refreshTokenHandler);
+// Injeção de dependência manual
+const userRepository = new UserRepository();
+const authService = new AuthService(userRepository);
+const authController = new AuthController(authService);
 
-export { router as authRoutes };
+authRoutes.post("/register", authController.register);
+authRoutes.post("/login", authController.login);
+authRoutes.post("/refresh-token", authController.refresh); // Nova rota
+
+export { authRoutes };

@@ -118,4 +118,34 @@ export class ProductRepository implements IProductRepository {
     );
     return rows as ProductImage[];
   }
+
+  // ==========================================================
+  // 4. CONTROLE DE ESTOQUE
+  // ==========================================================
+  async decreaseStock(variantId: number, quantity: number): Promise<void> {
+    await pool.execute(
+      `UPDATE product_variants 
+       SET stock = stock - ? 
+       WHERE id = ?`,
+      [quantity, variantId]
+    );
+  }
+
+  // ==========================================================
+  // NOVO MÉTODO: ADICIONAR IMAGEM INDIVIDUAL
+  // ==========================================================
+  async addImage(productId: number, imageUrl: string, isMain: boolean = false) {
+    const [res]: any = await pool.execute(
+      `INSERT INTO product_images (product_id, image_url, is_main, created_at)
+       VALUES (?, ?, ?, NOW())`,
+      [productId, imageUrl, isMain ? 1 : 0]
+    );
+
+    return {
+      id: res.insertId,
+      productId,
+      imageUrl,
+      isMain
+    };
+  }
 }

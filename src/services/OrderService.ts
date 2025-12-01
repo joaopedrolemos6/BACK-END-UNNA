@@ -21,7 +21,7 @@ export class OrderService {
   }
 
   // ==========================================================
-  // 1. CRIAÇÃO DO PEDIDO (fluxo original)
+  // 1. CRIAÇÃO DO PEDIDO
   // ==========================================================
   async createOrder(userId: number, data: any) {
     const parsed = createOrderSchema.safeParse(data);
@@ -44,9 +44,10 @@ export class OrderService {
 
       let price = product.price;
 
+      let variant = null;
       if (item.productVariantId) {
         const variants = await this.productRepository.findVariants(product.id);
-        const variant = variants.find((v) => v.id === item.productVariantId);
+        variant = variants.find((v) => v.id === item.productVariantId);
         if (!variant) throw new AppError("Variant not found", 404);
         price = variant.price ?? price;
       }
@@ -54,7 +55,7 @@ export class OrderService {
       subtotal += price * item.quantity;
 
       orderItemsPayload.push({
-        orderId: 0, // preenchido depois
+        orderId: 0,
         productId: product.id,
         productVariantId: item.productVariantId ?? null,
         productNameSnapshot: product.name,
@@ -63,16 +64,14 @@ export class OrderService {
         colorSnapshot: null,
         quantity: item.quantity,
         unitPrice: price,
-        totalPrice: price * item.quantity
+        totalPrice: price * item.quantity,
       });
     }
 
     const shippingAmount = shipping.type === "DELIVERY" ? 20 : 0;
 
-    if (shipping.type === "PICKUP") {
-      if (!shipping.storeId) {
-        throw new AppError("Store is required for pickup shipping", 400);
-      }
+    if (shipping.type === "PICKUP" && !shipping.storeId) {
+      throw new AppError("Store is required for pickup shipping", 400);
     }
 
     const total = subtotal + shippingAmount;
@@ -90,17 +89,28 @@ export class OrderService {
       shippingAmount: shippingAmount,
       totalAmount: total,
       mercadoPagoPreferenceId: null,
-      mercadoPagoPaymentId: null
+      mercadoPagoPaymentId: null,
     });
 
     // monta itens com orderId real
     const itemsToSave = orderItemsPayload.map((i) => ({
       ...i,
-      orderId: order.id
+      orderId: order.id,
     }));
 
     await this.orderRepository.createItems(order.id, itemsToSave);
 
+    // baixa de estoque variável
+    for (const item of items) {
+      if (item.productVariantId) {
+        await this.productRepository.decreaseStock(
+          item.productVariantId,
+          item.quantity
+        );
+      }
+    }
+
+    // endereço de entrega
     if (shipping.type === "DELIVERY" && shipping.address) {
       await this.orderRepository.createShipping({
         orderId: order.id,
@@ -108,10 +118,11 @@ export class OrderService {
         phone: customer.phone,
         ...shipping.address,
         shippingMethod: "standard",
-        estimatedDeliveryDate: null
+        estimatedDeliveryDate: null,
       });
     }
 
+    // registrar pagamento
     await this.orderRepository.createPayment({
       orderId: order.id,
       provider: "MERCADO_PAGO",
@@ -119,10 +130,10 @@ export class OrderService {
       status: "PENDING",
       transactionId: null,
       rawPayload: null,
-      paidAt: null
+      paidAt: null,
     });
 
-    // 🔥 Criar preference no Mercado Pago
+    // criar preference Mercado Pago
     const { preferenceId, initPoint } =
       await this.paymentService.createMercadoPagoPreference(
         order,
@@ -130,7 +141,7 @@ export class OrderService {
         {
           fullName: customer.fullName,
           email: customer.email,
-          phone: customer.phone
+          phone: customer.phone,
         }
       );
 
@@ -139,49 +150,46 @@ export class OrderService {
       total,
       mercadoPago: {
         preferenceId,
-        initPoint
-      }
+        initPoint,
+      },
     };
   }
 
   // ==========================================================
-  // 2. DETALHES COMPLETOS DO PEDIDO (ETAPA 10)
+  // 2. DETALHES DO PEDIDO
   // ==========================================================
   async getOrderDetails(orderNumber: string) {
     if (!orderNumber || typeof orderNumber !== "string") {
       throw new AppError("Invalid orderNumber", 400);
     }
 
-    const fullOrder = await this.orderRepository.findFullOrderByNumber(orderNumber);
-
-    if (!fullOrder) {
-      throw new AppError("Pedido não encontrado.", 404);
-    }
+    const fullOrder = await this.orderRepository.findFullOrderByNumber(
+      orderNumber
+    );
+    if (!fullOrder) throw new AppError("Pedido não encontrado.", 404);
 
     const { order, items, shipping, payments } = fullOrder;
 
-    // timeline profissional
-    const timeline: Array<{
-      label: string;
-      status: string;
-      date: string | null;
-    }> = [];
+    const timeline: any[] = [];
 
+    // Criado
     timeline.push({
       label: "Pedido criado",
       status: order.status,
-      date: (order as any).createdAt ?? (order as any).created_at ?? null
+      date: order.createdAt ?? (order as any).created_at ?? null,
     });
 
+    // Pagamento
     const lastPayment = payments[0];
     if (lastPayment) {
       timeline.push({
         label: "Pagamento atualizado",
         status: lastPayment.status,
-        date: lastPayment.paidAt ?? (lastPayment as any).paid_at ?? null
+        date: lastPayment.paidAt ?? (lastPayment as any).paid_at ?? null,
       });
     }
 
+    // Envio
     if (shipping) {
       timeline.push({
         label: "Envio / Entrega",
@@ -189,7 +197,7 @@ export class OrderService {
         date:
           shipping.estimatedDeliveryDate ??
           (shipping as any).estimated_delivery_date ??
-          null
+          null,
       });
     }
 
@@ -204,11 +212,11 @@ export class OrderService {
         discountAmount: order.discountAmount,
         shippingAmount: order.shippingAmount,
         totalAmount: order.totalAmount,
-        createdAt: (order as any).createdAt ?? (order as any).created_at ?? null,
-        updatedAt: (order as any).updatedAt ?? (order as any).updated_at ?? null
+        createdAt: order.createdAt ?? (order as any).created_at ?? null,
+        updatedAt: order.updatedAt ?? (order as any).updated_at ?? null,
       },
 
-      items: items.map(item => ({
+      items: items.map((item) => ({
         id: item.id,
         productId: item.productId,
         productVariantId: item.productVariantId,
@@ -218,7 +226,8 @@ export class OrderService {
         color: item.colorSnapshot,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        totalPrice: item.totalPrice
+        totalPrice: item.totalPrice,
+      lmfit,
       })),
 
       shipping: shipping
@@ -237,20 +246,76 @@ export class OrderService {
             estimatedDeliveryDate:
               shipping.estimatedDeliveryDate ??
               (shipping as any).estimated_delivery_date ??
-              null
+              null,
           }
         : null,
 
-      payments: payments.map(p => ({
+      payments: payments.map((p) => ({
         id: p.id,
         provider: p.provider,
         method: p.method,
         status: p.status,
         transactionId: p.transactionId,
-        paidAt: p.paidAt ?? (p as any).paid_at ?? null
+        paidAt: p.paidAt ?? (p as any).paid_at ?? null,
       })),
 
-      timeline
+      timeline,
+    };
+  }
+
+  // ==========================================================
+  // 3. ADMIN — LISTAR TODOS OS PEDIDOS
+  // ==========================================================
+  async listAllOrders(status?: string) {
+    const params: any = {};
+
+    if (status && typeof status === "string") {
+      params.status = status.toUpperCase();
+    }
+
+    const orders = await this.orderRepository.findAll(params);
+
+    return orders.map((o) => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      status: o.status,
+      paymentStatus: o.paymentStatus,
+      totalAmount: o.totalAmount,
+      createdAt: o.createdAt ?? (o as any).created_at ?? null,
+    }));
+  }
+
+  // ==========================================================
+  // 4. ADMIN — ATUALIZAR STATUS DO PEDIDO
+  // ==========================================================
+  async updateOrderStatus(orderId: number, newStatus: string) {
+    // 🛠️ CORREÇÃO: Lista sincronizada com o ENUM do seu MySQL
+    const allowed = [
+      "PENDING",
+      "CONFIRMED",
+      "PAID",
+      "CANCELLED", // Atenção: No seu SQL está com dois Ls
+      "SHIPPED",
+      "DELIVERED",
+    ];
+
+    newStatus = newStatus.toUpperCase();
+
+    if (!allowed.includes(newStatus)) {
+      // Retorna erro 400 com mensagem clara
+      throw new AppError(`Invalid status. Allowed: ${allowed.join(", ")}`, 400);
+    }
+
+    const order = await this.orderRepository.findById(orderId);
+    if (!order) throw new AppError("Pedido não encontrado.", 404);
+
+    await this.orderRepository.updateStatus(orderId, newStatus);
+
+    return {
+      message: "Status atualizado com sucesso.",
+      orderId,
+      previousStatus: order.status,
+      newStatus,
     };
   }
 }

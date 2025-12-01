@@ -22,4 +22,7 @@ export interface IProductRepository {
 
   findVariants(productId: number): Promise<ProductVariant[]>;
   findImages(productId: number): Promise<ProductImage[]>;
+
+  // 🔥 NOVO MÉTODO: Baixar estoque
+  decreaseStock(variantId: number, quantity: number): Promise<void>;
 }

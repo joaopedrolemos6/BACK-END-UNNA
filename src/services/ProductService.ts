@@ -75,4 +75,24 @@ export class ProductService {
   }) {
     return this.productRepository.findAll(params);
   }
+
+  // ==========================================================
+  // NOVO MÉTODO: uploadImage()
+  // ==========================================================
+  async uploadImage(productId: number, filename: string) {
+    // Verifica se o produto existe
+    const product = await this.productRepository.findById(productId);
+    if (!product) {
+      throw new AppError("Product not found", 404);
+    }
+
+    // URL base (ajuste conforme necessário)
+    const baseUrl = "http://localhost:3333/uploads";
+    const imageUrl = `${baseUrl}/${filename}`;
+
+    // Salva no banco
+    const result = await this.productRepository.addImage(productId, imageUrl, false);
+
+    return result;
+  }
 }

@@ -1,0 +1,9 @@
+{"level":"info","message":"🚀 MODELO-UNNA API running on http://localhost:3333/api/health","timestamp":"2025-11-26 13:01:02"}
+{"level":"info","message":"🚀 MODELO-UNNA API running on http://localhost:3333/api/health","timestamp":"2025-11-26 23:04:26"}
+{"level":"info","message":"🚀 MODELO-UNNA API running on http://localhost:3333/api/health","timestamp":"2025-11-26 23:20:56"}
+{"level":"error","message":"🔥 CRITICAL ERROR em POST /api/auth/login:","timestamp":"2025-11-26 23:21:00"}
+{"level":"error","message":"Error: Illegal arguments: string, undefined\n    at _async (C:\\Users\\lemin\\Desktop\\projetos-clientes\\UNNA-SITE-KELMA\\BACK-END-MODELO-UNNA\\node_modules\\bcryptjs\\dist\\bcrypt.js:286:46)\n    at C:\\Users\\lemin\\Desktop\\projetos-clientes\\UNNA-SITE-KELMA\\BACK-END-MODELO-UNNA\\node_modules\\bcryptjs\\dist\\bcrypt.js:307:17\n    at new Promise (<anonymous>)\n    at bcrypt.compare (C:\\Users\\lemin\\Desktop\\projetos-clientes\\UNNA-SITE-KELMA\\BACK-END-MODELO-UNNA\\node_modules\\bcryptjs\\dist\\bcrypt.js:306:20)\n    at AuthService.login (C:\\Users\\lemin\\Desktop\\projetos-clientes\\UNNA-SITE-KELMA\\BACK-END-MODELO-UNNA\\src\\services\\AuthService.ts:60:32)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)\n    at async login (C:\\Users\\lemin\\Desktop\\projetos-clientes\\UNNA-SITE-KELMA\\BACK-END-MODELO-UNNA\\src\\controllers\\AuthController.ts:13:20)","timestamp":"2025-11-26 23:21:00"}
+{"level":"info","message":"🚀 MODELO-UNNA API running on http://localhost:3333/api/health","timestamp":"2025-11-26 23:32:56"}
+{"level":"info","message":"🚀 MODELO-UNNA API running on http://localhost:3333/api/health","timestamp":"2025-12-01 12:03:29"}
+{"level":"warn","message":"⚠️ Erro Operacional: Invalid status (Status: 400)","timestamp":"2025-12-01 12:06:12"}
+{"level":"info","message":"🚀 MODELO-UNNA API running on http://localhost:3333/api/health","timestamp":"2025-12-01 12:15:00"}

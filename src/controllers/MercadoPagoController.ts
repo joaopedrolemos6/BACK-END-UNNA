@@ -1,24 +1,34 @@
 import { Request, Response } from "express";
-import { MercadoPagoService } from "../services/MercadoPagoService";
+import { PaymentService } from "../services/PaymentService";
+import { OrderRepository } from "../repositories/mysql/OrderRepository";
+import { ProductRepository } from "../repositories/mysql/ProductRepository"; // Import novo
 
 class MercadoPagoController {
-  private service = new MercadoPagoService();
+  private orderRepository = new OrderRepository();
+  private productRepository = new ProductRepository(); // Instância nova
+  
+  // Injeção das duas dependências
+  private paymentService = new PaymentService(
+    this.orderRepository, 
+    this.productRepository
+  );
 
-  webhook = async (req: Request, res: Response) => {
+  handleWebhook = async (req: Request, res: Response) => {
     try {
-      const topic = req.body.type || req.body.action || "unknown";
-      const data = req.body.data || {};
-      
-      await this.service.processWebhook({
-        signature: req.headers["x-signature-id"] as string | undefined,
-        topic,
-        data,
-        body: req.body
-      });
+      const { type, data } = req.body;
+      const topic = type || req.body.action;
+      const id = data?.id || req.body.data?.id;
 
-      return res.status(200).json({ success: true });
+      console.log(`🔔 Webhook recebido: Tópico [${topic}] - ID [${id}]`);
+
+      if (topic === "payment" && id) {
+        await this.paymentService.handleMercadoPagoWebhook(id);
+        return res.status(200).json({ success: true });
+      }
+
+      return res.status(200).json({ message: "Event ignored" });
     } catch (error: any) {
-      console.error("Erro no webhook:", error.message);
+      console.error(`❌ Erro no Webhook: ${error.message}`);
       return res.status(500).json({ error: error.message });
     }
   };

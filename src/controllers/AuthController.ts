@@ -13,4 +13,10 @@ export class AuthController {
     const result = await this.authService.login(req.body);
     return res.json(result);
   };
+
+  refresh = async (req: Request, res: Response) => {
+    const { refreshToken } = req.body;
+    const result = await this.authService.refreshToken(refreshToken);
+    return res.json(result);
+  };
 }

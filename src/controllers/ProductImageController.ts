@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
-import { ProductService } from "../../../services/ProductService";
-import { AppError } from "../../../errors/AppError";
+// CORREÇÃO: Ajustados os caminhos para voltar apenas uma pasta (../)
+import { ProductService } from "../services/ProductService";
+import { AppError } from "../errors/AppError";
 
 export class ProductImageController {
   constructor(private productService: ProductService) {}

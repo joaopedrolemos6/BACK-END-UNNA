@@ -7,11 +7,16 @@ import {
 } from "../../entities/Product";
 
 export class ProductRepository implements IProductRepository {
+  
+  // ==========================================================
+  // 1. MÉTODOS DE CRIAÇÃO E ATUALIZAÇÃO
+  // ==========================================================
+  
   async createProduct(data: Omit<Product, "id" | "createdAt" | "updatedAt">): Promise<Product> {
     const [result] = await pool.execute(
       `INSERT INTO products
-       (category_id, slug, name, description, price, old_price, discount_percent, sku, status, is_featured)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (category_id, slug, name, description, price, old_price, discount_percent, sku, status, is_featured, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         data.categoryId,
         data.slug,
@@ -27,7 +32,7 @@ export class ProductRepository implements IProductRepository {
     );
 
     const insertId = (result as any).insertId;
-    return await this.findById(insertId) as Product;
+    return (await this.findById(insertId)) as Product;
   }
 
   async updateProduct(id: number, data: Partial<Product>): Promise<void> {
@@ -38,7 +43,7 @@ export class ProductRepository implements IProductRepository {
     const values = fields.map((f) => (data as any)[f]);
 
     await pool.execute(
-      `UPDATE products SET ${updates}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      `UPDATE products SET ${updates}, updated_at = NOW() WHERE id = ?`,
       [...values, id]
     );
   }
@@ -46,8 +51,8 @@ export class ProductRepository implements IProductRepository {
   async createVariants(productId: number, variants: Omit<ProductVariant, "id" | "productId" | "createdAt" | "updatedAt">[]): Promise<void> {
     for (const v of variants) {
       await pool.execute(
-        `INSERT INTO product_variants (product_id, size_id, color_id, sku, stock, price)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO product_variants (product_id, size_id, color_id, sku, stock, price, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [productId, v.sizeId, v.colorId, v.sku, v.stock, v.price]
       );
     }
@@ -55,24 +60,36 @@ export class ProductRepository implements IProductRepository {
 
   async createImages(productId: number, images: Omit<ProductImage, "id" | "productId" | "createdAt">[]): Promise<void> {
     for (const img of images) {
-      await pool.execute(
-        `INSERT INTO product_images (product_id, image_url, is_main, sort_order)
-         VALUES (?, ?, ?, ?)`,
-        [productId, img.imageUrl, img.isMain, img.sortOrder]
-      );
+      await this.addImage(productId, img.imageUrl, img.isMain);
     }
   }
 
+  // ==========================================================
+  // 2. MÉTODOS DE BUSCA (AGORA COM IMAGENS)
+  // ==========================================================
+
   async findById(id: number): Promise<Product | null> {
-    const [rows] = await pool.execute(`SELECT * FROM products WHERE id = ?`, [id]);
-    const [prod] = rows as Product[];
-    return prod || null;
+    const [rows]: any = await pool.execute(`SELECT * FROM products WHERE id = ?`, [id]);
+    if (rows.length === 0) return null;
+
+    const product = rows[0] as Product;
+    
+    // Busca e anexa as imagens
+    product.images = await this.findImages(product.id);
+    
+    return product;
   }
 
   async findBySlug(slug: string): Promise<Product | null> {
-    const [rows] = await pool.execute(`SELECT * FROM products WHERE slug = ?`, [slug]);
-    const [prod] = rows as Product[];
-    return prod || null;
+    const [rows]: any = await pool.execute(`SELECT * FROM products WHERE slug = ?`, [slug]);
+    if (rows.length === 0) return null;
+
+    const product = rows[0] as Product;
+
+    // Busca e anexa as imagens
+    product.images = await this.findImages(product.id);
+
+    return product;
   }
 
   async findAll(params: {
@@ -99,9 +116,24 @@ export class ProductRepository implements IProductRepository {
 
     query += ` ORDER BY created_at DESC`;
 
-    const [rows] = await pool.execute(query, values);
-    return rows as Product[];
+    const [rows]: any = await pool.execute(query, values);
+    const products = rows as Product[];
+
+    // Para cada produto, busca as imagens (Populate)
+    // Usando Promise.all para fazer as buscas em paralelo (mais rápido)
+    const productsWithImages = await Promise.all(
+      products.map(async (product) => {
+        const images = await this.findImages(product.id);
+        return { ...product, images };
+      })
+    );
+
+    return productsWithImages;
   }
+
+  // ==========================================================
+  // 3. MÉTODOS AUXILIARES (IMAGENS E VARIANTES)
+  // ==========================================================
 
   async findVariants(productId: number): Promise<ProductVariant[]> {
     const [rows] = await pool.execute(
@@ -113,7 +145,7 @@ export class ProductRepository implements IProductRepository {
 
   async findImages(productId: number): Promise<ProductImage[]> {
     const [rows] = await pool.execute(
-      `SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order ASC`,
+      `SELECT * FROM product_images WHERE product_id = ? ORDER BY is_main DESC, sort_order ASC`,
       [productId]
     );
     return rows as ProductImage[];
@@ -132,9 +164,17 @@ export class ProductRepository implements IProductRepository {
   }
 
   // ==========================================================
-  // NOVO MÉTODO: ADICIONAR IMAGEM INDIVIDUAL
+  // 5. UPLOAD DE IMAGEM ÚNICA
   // ==========================================================
   async addImage(productId: number, imageUrl: string, isMain: boolean = false) {
+    // Se for definida como principal, remove o status de principal das outras
+    if (isMain) {
+      await pool.execute(
+        `UPDATE product_images SET is_main = 0 WHERE product_id = ?`,
+        [productId]
+      );
+    }
+
     const [res]: any = await pool.execute(
       `INSERT INTO product_images (product_id, image_url, is_main, created_at)
        VALUES (?, ?, ?, NOW())`,

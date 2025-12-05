@@ -19,8 +19,8 @@ export class OrderRepository implements IOrderRepository {
       `INSERT INTO orders
        (user_id, cart_id, order_number, status, payment_status, shipping_type, store_id,
         subtotal_amount, discount_amount, shipping_amount, total_amount,
-        mercado_pago_preference_id, mercado_pago_payment_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        mercado_pago_preference_id, mercado_pago_payment_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         data.userId,
         data.cartId,
@@ -28,19 +28,19 @@ export class OrderRepository implements IOrderRepository {
         data.status,
         data.paymentStatus,
         data.shippingType,
-        data.storeId,
+        data.storeId || null,
         data.subtotalAmount,
         data.discountAmount,
         data.shippingAmount,
         data.totalAmount,
-        data.mercadoPagoPreferenceId,
-        data.mercadoPagoPaymentId
+        data.mercadoPagoPreferenceId || null,
+        data.mercadoPagoPaymentId || null
       ]
     );
 
     const id = (result as any).insertId;
-    const [rows] = await pool.execute(`SELECT * FROM orders WHERE id = ?`, [id]);
-    return (rows as Order[])[0];
+    const [rows]: any = await pool.execute(`SELECT * FROM orders WHERE id = ?`, [id]);
+    return rows[0] as Order;
   }
 
   // ==========================================================
@@ -56,11 +56,11 @@ export class OrderRepository implements IOrderRepository {
       values.push(
         orderId,
         item.productId,
-        item.productVariantId,
+        item.productVariantId || null,
         item.productNameSnapshot,
         item.productSlugSnapshot,
-        item.sizeSnapshot,
-        item.colorSnapshot,
+        item.sizeSnapshot || null,
+        item.colorSnapshot || null,
         item.quantity,
         item.unitPrice,
         item.totalPrice
@@ -91,24 +91,24 @@ export class OrderRepository implements IOrderRepository {
         data.phone,
         data.street,
         data.number,
-        data.complement,
+        data.complement || null,
         data.neighborhood,
         data.city,
         data.state,
         data.zipCode,
         data.country,
         data.shippingMethod,
-        data.estimatedDeliveryDate
+        data.estimatedDeliveryDate || null
       ]
     );
   }
 
   // ==========================================================
-  // 4. REGISTRO DE PAGAMENTO
+  // 4. REGISTRO DE PAGAMENTO (CORRIGIDO: NOME DA TABELA)
   // ==========================================================
   async createPayment(data: Omit<OrderPayment, "id">): Promise<void> {
     await pool.execute(
-      `INSERT INTO order_payment
+      `INSERT INTO order_payment  -- <--- CORRIGIDO: Singular
        (order_id, provider, method, status, transaction_id, raw_payload, paid_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -116,34 +116,29 @@ export class OrderRepository implements IOrderRepository {
         data.provider,
         data.method,
         data.status,
-        data.transactionId,
-        JSON.stringify(data.rawPayload ?? null),
-        data.paidAt
+        data.transactionId || null,
+        data.rawPayload ? JSON.stringify(data.rawPayload) : null,
+        data.paidAt || null
       ]
     );
   }
 
   // ==========================================================
-  // 5. BUSCAR PEDIDOS (MÉTODOS BÁSICOS)
+  // 5. BUSCAR PEDIDOS
   // ==========================================================
   async findById(id: number): Promise<Order | null> {
-    const [rows] = await pool.execute(`SELECT * FROM orders WHERE id = ?`, [id]);
-    const [order] = rows as Order[];
-    return order || null;
+    const [rows]: any = await pool.execute(`SELECT * FROM orders WHERE id = ?`, [id]);
+    return (rows[0] as Order) || null;
   }
 
   async findByOrderNumber(orderNumber: string): Promise<Order | null> {
-    const [rows] = await pool.execute(
+    const [rows]: any = await pool.execute(
       `SELECT * FROM orders WHERE order_number = ?`,
       [orderNumber]
     );
-    const [order] = rows as Order[];
-    return order || null;
+    return (rows[0] as Order) || null;
   }
 
-  // ==========================================================
-  // 6. LISTAGENS (ATUALIZADO ETAPA 6)
-  // ==========================================================
   async findAll(params?: { status?: string }): Promise<Order[]> {
     let query = `SELECT * FROM orders WHERE 1=1`;
     const values: any[] = [];
@@ -159,7 +154,6 @@ export class OrderRepository implements IOrderRepository {
     return rows as Order[];
   }
 
-  // Lista pedidos de um usuário específico (Histórico)
   async findManyByUserId(userId: number): Promise<Order[]> {
     const [rows] = await pool.execute(
       `SELECT * FROM orders 
@@ -170,23 +164,22 @@ export class OrderRepository implements IOrderRepository {
     return rows as Order[];
   }
 
-  // ==========================================================
-  // 7. MÉTODOS EXTRAS (MERCADO PAGO & UPDATES)
-  // ==========================================================
   async findOrderByPaymentId(paymentId: string): Promise<Order | null> {
-    const [rows] = await pool.execute(
+    const [rows]: any = await pool.execute(
       `SELECT * FROM orders WHERE mercado_pago_payment_id = ?`,
       [paymentId]
     );
 
-    const [order] = rows as Order[];
-    return order || null;
+    return (rows[0] as Order) || null;
   }
 
+  // ==========================================================
+  // 6. UPDATES
+  // ==========================================================
   async updateStatus(orderId: number, status: string): Promise<void> {
     await pool.execute(
       `UPDATE orders
-       SET status = ?, updated_at = CURRENT_TIMESTAMP
+       SET status = ?, updated_at = NOW()
        WHERE id = ?`,
       [status, orderId]
     );
@@ -202,12 +195,12 @@ export class OrderRepository implements IOrderRepository {
   ): Promise<void> {
     await pool.execute(
       `UPDATE orders
-       SET status = ?, payment_status = ?, mercado_pago_payment_id = ?, updated_at = CURRENT_TIMESTAMP
+       SET status = ?, payment_status = ?, mercado_pago_payment_id = ?, updated_at = NOW()
        WHERE id = ?`,
       [
         params.status,
         params.paymentStatus,
-        params.mercadoPagoPaymentId ?? null,
+        params.mercadoPagoPaymentId || null,
         orderId
       ]
     );
@@ -216,14 +209,14 @@ export class OrderRepository implements IOrderRepository {
   async updateMercadoPagoPreference(orderId: number, preferenceId: string): Promise<void> {
     await pool.execute(
       `UPDATE orders
-       SET mercado_pago_preference_id = ?, updated_at = CURRENT_TIMESTAMP
+       SET mercado_pago_preference_id = ?, updated_at = NOW()
        WHERE id = ?`,
       [preferenceId, orderId]
     );
   }
 
   // ==========================================================
-  // 8. BUSCAR PEDIDO COMPLETO
+  // 7. BUSCAR PEDIDO COMPLETO (CORRIGIDO: NOME DA TABELA)
   // ==========================================================
   async findFullOrderByNumber(orderNumber: string): Promise<{
     order: Order;
@@ -231,12 +224,12 @@ export class OrderRepository implements IOrderRepository {
     shipping: OrderShipping | null;
     payments: OrderPayment[];
   } | null> {
-    const [orderRows] = await pool.execute(
+    const [orderRows]: any = await pool.execute(
       `SELECT * FROM orders WHERE order_number = ?`,
       [orderNumber]
     );
 
-    const [order] = orderRows as Order[];
+    const order = orderRows[0] as Order;
     if (!order) return null;
 
     const [itemsRows] = await pool.execute(
@@ -245,15 +238,15 @@ export class OrderRepository implements IOrderRepository {
     );
     const items = itemsRows as OrderItem[];
 
-    const [shippingRows] = await pool.execute(
+    const [shippingRows]: any = await pool.execute(
       `SELECT * FROM order_shipping WHERE order_id = ?`,
       [order.id]
     );
-    const [shipping] = shippingRows as OrderShipping[];
+    const shipping = shippingRows[0] as OrderShipping;
     const shippingData = shipping || null;
 
     const [paymentsRows] = await pool.execute(
-      `SELECT * FROM order_payment WHERE order_id = ? ORDER BY paid_at DESC, id DESC`,
+      `SELECT * FROM order_payment WHERE order_id = ? ORDER BY paid_at DESC, id DESC`, // <--- CORRIGIDO: Singular
       [order.id]
     );
     const payments = paymentsRows as OrderPayment[];

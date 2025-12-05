@@ -1,57 +1,51 @@
-import { AuthService } from "../services/AuthService";
-import { CategoryService } from "../services/CategoryService";
-import { ProductService } from "../services/ProductService";
-import { StoreService } from "../services/StoreService";
-import { CartService } from "../services/CartService";
-import { OrderService } from "../services/OrderService";
-import { PaymentService } from "../services/PaymentService";
-
 import { AuthController } from "../controllers/AuthController";
+import { UserController } from "../controllers/UserController";
 import { CategoryController } from "../controllers/CategoryController";
-import { ProductController } from "../controllers/ProductController";
-import { StoreController } from "../controllers/StoreController";
+import { ProductController } from "../controllers/ProductController"; // Adicionado
 import { CartController } from "../controllers/CartController";
 import { OrderController } from "../controllers/OrderController";
 import { PaymentController } from "../controllers/PaymentController";
+import { MercadoPagoController } from "../controllers/MercadoPagoController"; // Adicionado
 
 import { UserRepository } from "../repositories/mysql/UserRepository";
-import { CategoryRepository } from "../repositories/mysql/CategoryRepository";
-import { ProductRepository } from "../repositories/mysql/ProductRepository";
-import { StoreRepository } from "../repositories/mysql/StoreRepository";
 import { CartRepository } from "../repositories/mysql/CartRepository";
+import { CategoryRepository } from "../repositories/mysql/CategoryRepository";
+import { ProductRepository } from "../repositories/mysql/ProductRepository"; // Adicionado
 import { OrderRepository } from "../repositories/mysql/OrderRepository";
 
-// Repositories
-const userRepo = new UserRepository();
-const categoryRepo = new CategoryRepository();
-const productRepo = new ProductRepository();
-const storeRepo = new StoreRepository();
-const cartRepo = new CartRepository();
-const orderRepo = new OrderRepository();
+import { AuthService } from "../services/AuthService";
+import { UserService } from "../services/UserService";
+import { CartService } from "../services/CartService";
+import { CategoryService } from "../services/CategoryService";
+import { ProductService } from "../services/ProductService"; // Adicionado
+import { OrderService } from "../services/OrderService";
+import { PaymentService } from "../services/PaymentService"; // Adicionado
 
-// Services
-const authService = new AuthService(userRepo);
-const categoryService = new CategoryService(categoryRepo);
-const storeService = new StoreService(storeRepo);
-const productService = new ProductService(productRepo);
-const cartService = new CartService(cartRepo, productRepo);
 
-// 🔥 Atualizado: Injeção do productRepo no PaymentService para controle de estoque
-const paymentService = new PaymentService(orderRepo, productRepo);
+// Repositórios
+const userRepository = new UserRepository();
+const cartRepository = new CartRepository();
+const categoryRepository = new CategoryRepository();
+const productRepository = new ProductRepository();
+const orderRepository = new OrderRepository();
 
-const orderService = new OrderService(
-  orderRepo,
-  cartRepo,
-  productRepo,
-  storeService,
-  paymentService
-);
+
+// Serviços
+const userService = new UserService(userRepository);
+const authService = new AuthService(userRepository);
+const cartService = new CartService(cartRepository, productRepository);
+const categoryService = new CategoryService(categoryRepository);
+const productService = new ProductService(productRepository); // Instância do ProductService
+const paymentService = new PaymentService(orderRepository, productRepository); // Instância do PaymentService
+const orderService = new OrderService(orderRepository, cartRepository, productService, paymentService);
+
 
 // Controllers
 export const authController = new AuthController(authService);
-export const categoryController = new CategoryController(categoryService);
-export const storeController = new StoreController(storeService);
-export const productController = new ProductController(productService);
+export const userController = new UserController(userService);
 export const cartController = new CartController(cartService);
+export const categoryController = new CategoryController(categoryService);
 export const orderController = new OrderController(orderService);
-export const paymentController = new PaymentController(paymentService);
+export const paymentController = new PaymentController();
+export const mercadoPagoController = new MercadoPagoController(paymentService); // Adicionado
+export const productController = new ProductController(productService); // <-- ADICIONADO AQUI

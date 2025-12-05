@@ -1,16 +1,16 @@
-import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
+import { MercadoPagoConfig, Preference, Payment, MerchantOrder } from "mercadopago";
 import { env } from "../config/env";
 import { Order, OrderItem, PaymentStatus, OrderStatus } from "../entities/Order";
 import { IOrderRepository } from "../repositories/interfaces/IOrderRepository";
-import { IProductRepository } from "../repositories/interfaces/IProductRepository"; // Import novo
+import { IProductRepository } from "../repositories/interfaces/IProductRepository";
 import { AppError } from "../errors/AppError";
 
 export class PaymentService {
   private client: MercadoPagoConfig;
   private preferenceClient: Preference;
   public paymentClient: Payment;
+  public merchantOrderClient: MerchantOrder; // <-- Adicionado o cliente MerchantOrder
 
-  // Injetamos também o ProductRepository agora
   constructor(
     private orderRepository: IOrderRepository,
     private productRepository: IProductRepository 
@@ -21,6 +21,7 @@ export class PaymentService {
     this.client = new MercadoPagoConfig({ accessToken: env.MP_ACCESS_TOKEN });
     this.preferenceClient = new Preference(this.client);
     this.paymentClient = new Payment(this.client);
+    this.merchantOrderClient = new MerchantOrder(this.client); // <-- Instanciado
   }
 
   // ==========================================================
@@ -31,7 +32,8 @@ export class PaymentService {
     items: OrderItem[],
     customer: { fullName: string; email: string; phone: string }
   ) {
-    const notificationUrl = `${env.API_URL}/api/payments/mercadopago/webhook`;
+    // 💡 ATENÇÃO: Esta é a URL TEMPORÁRIA do ngrok
+    const notificationUrl = "https://a7e32e970e91.ngrok-free.app/api/mercadopago/webhook"; 
 
     const body = {
       external_reference: order.orderNumber,
@@ -46,12 +48,15 @@ export class PaymentService {
         currency_id: "BRL",
         unit_price: Number(item.unitPrice)
       })),
+      
+      // URLs de retorno: o Mercado Pago redireciona o usuário para cá
       back_urls: {
-        success: `${env.APP_URL}/checkout/success?order=${order.orderNumber}`,
+        success: `${env.APP_URL}/checkout/success`,
         failure: `${env.APP_URL}/checkout/failure`,
         pending: `${env.APP_URL}/checkout/pending`
       },
-      auto_return: "approved",
+      
+      auto_return: "approved" as const,
       notification_url: notificationUrl,
       statement_descriptor: "UNNA E-COMMERCE",
     };
@@ -73,12 +78,25 @@ export class PaymentService {
     } catch (error: any) {
       console.error("Erro ao criar preferência no MP:", error);
       const errorMsg = error.cause?.description || error.message;
-      throw new AppError(`Erro no pagamento: ${errorMsg}`, 500);
+      throw new AppError(`Erro no pagamento: ${errorMsg}`, 400);
     }
   }
 
   // ==========================================================
-  // 2. PROCESSAR NOTIFICAÇÃO (WEBHOOK)
+  // 2. BUSCAR MERCHANT ORDER (NOVO MÉTODO)
+  // ==========================================================
+  async getMerchantOrder(merchantOrderId: string) {
+    try {
+      const merchantOrder = await this.merchantOrderClient.get({ id: merchantOrderId });
+      return merchantOrder;
+    } catch (error: any) {
+      console.error("Erro ao buscar Merchant Order no MP:", error);
+      throw new AppError("Falha ao buscar Merchant Order.", 500);
+    }
+  }
+  
+  // ==========================================================
+  // 3. PROCESSAR NOTIFICAÇÃO (WEBHOOK)
   // ==========================================================
   async handleMercadoPagoWebhook(paymentId: string) {
     try {
@@ -151,7 +169,8 @@ export class PaymentService {
 
     } catch (error: any) {
       console.error("Erro ao processar webhook no Service:", error);
-      throw new AppError(error.message || "Erro interno no webhook", error.statusCode || 500);
+      // Aqui podemos lançar um erro 500 para o Mercado Pago tentar reenviar
+      throw new AppError(error.message || "Erro interno no webhook", error.statusCode || 500); 
     }
   }
 }

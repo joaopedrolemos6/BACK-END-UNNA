@@ -1,33 +1,25 @@
 import { Router } from "express";
 import express from "express";
-import { mercadoPagoController } from "../controllers/MercadoPagoController";
+import { mercadoPagoWebhook } from "../controllers/mercadoPagoWebhookController"; // Ajuste o import conforme seu export
 
 const router = Router();
 
-// Rota de teste para confirmar que o arquivo carregou
 router.get("/", (req, res) => {
-  res.send("Rotas do Mercado Pago carregadas com sucesso.");
+  res.send("Rotas do Mercado Pago ativas.");
 });
 
+// O Mercado Pago manda um POST para notificar
 router.post(
   "/webhook",
-  // Usamos express.raw para pegar o corpo cru se necessário, senão o JSON padrão
-  express.json(), 
+  // Se precisar validar assinatura HMAC no futuro, use express.raw aqui. 
+  // Por enquanto, express.json no app.ts global já resolve para JSON simples.
   async (req, res) => {
-    console.log("📩 Recebendo notificação no /webhook");
-    try {
-      // Chamada direta para garantir que o método existe
-      if (!mercadoPagoController || !mercadoPagoController.handleWebhook) {
-         console.error("❌ Erro Crítico: Controller não inicializado corretamente.");
-         return res.status(500).json({ error: "Internal Server Error - Controller Missing" });
-      }
-      return await mercadoPagoController.handleWebhook(req, res);
-    } catch (error) {
-      console.error("Erro na rota webhook:", error);
-      return res.status(500).json({ error: "Internal Execution Error" });
-    }
+    console.log("📩 Recebendo Webhook MP:", JSON.stringify(req.body));
+    console.log("Query Params:", req.query);
+    
+    // O controller foi importado ali em cima
+    return await mercadoPagoWebhook(req, res);
   }
 );
 
-// MUDANÇA IMPORTANTE: Exportação direta da constante
 export const mercadoPagoRoutes = router;

@@ -1,25 +1,17 @@
-import { Router } from "express";
-import express from "express";
-import { mercadoPagoWebhook } from "../controllers/mercadoPagoWebhookController"; // Ajuste o import conforme seu export
+// src/routes/mercadopago.routes.ts
 
-const router = Router();
+import { Router, raw } from "express"; // Importa 'raw' do express
+import { mercadoPagoWebhookController } from "./factories";
+import { verifyMercadoPagoSignature } from "../middlewares/verifyMercadoPagoSignature"; 
 
-router.get("/", (req, res) => {
-  res.send("Rotas do Mercado Pago ativas.");
-});
+const mercadoPagoRoutes = Router();
 
-// O Mercado Pago manda um POST para notificar
-router.post(
+// Middleware raw é aplicado nesta rota para obter o corpo bruto (Buffer)
+mercadoPagoRoutes.post(
   "/webhook",
-  // Se precisar validar assinatura HMAC no futuro, use express.raw aqui. 
-  // Por enquanto, express.json no app.ts global já resolve para JSON simples.
-  async (req, res) => {
-    console.log("📩 Recebendo Webhook MP:", JSON.stringify(req.body));
-    console.log("Query Params:", req.query);
-    
-    // O controller foi importado ali em cima
-    return await mercadoPagoWebhook(req, res);
-  }
+  raw({ type: "application/json", limit: "10mb" }), // <--- OBTÉM O BODY RAW
+  verifyMercadoPagoSignature, // Valida a assinatura com o body RAW
+  mercadoPagoWebhookController.handle
 );
 
-export const mercadoPagoRoutes = router;
+export default mercadoPagoRoutes;

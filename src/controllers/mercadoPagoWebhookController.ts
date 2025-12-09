@@ -1,33 +1,57 @@
+// src/controllers/mercadoPagoWebhookController.ts
+
 import { Request, Response } from "express";
+import { AppError } from "../errors/AppError";
+// Importar os tipos de Serviço e Controller necessários para a injeção
+import { WebhookService } from "../services/webhookService";
 import { PaymentService } from "../services/PaymentService";
-// Você precisará instanciar o PaymentService aqui com os repositórios reais
-// Como isso pode ser complexo sem injeção de dependência automática, 
-// vou assumir que você tem uma instância exportada ou criará aqui.
-import { OrderRepository } from "../repositories/mysql/OrderRepository"; // Exemplo
-import { ProductRepository } from "../repositories/mysql/ProductRepository"; // Exemplo
+import { OrderController } from "./OrderController"; 
 
-// Instanciando repositórios e serviço manualmente (ajuste os caminhos conforme sua estrutura)
-const orderRepository = new OrderRepository();
-const productRepository = new ProductRepository();
-const paymentService = new PaymentService(orderRepository, productRepository);
+// Tipos básicos para o payload do webhook (para evitar erros de tipo)
+interface WebhookPayload {
+  topic: string;
+  data: {
+    id: string; // payment ID ou merchant order ID
+  };
+}
 
-export async function mercadoPagoWebhook(req: Request, res: Response) {
-  try {
-    // O ID do pagamento geralmente vem em req.body.data.id ou req.query['data.id']
-    const paymentId = req.body?.data?.id || req.query['data.id'] || req.body?.id;
-    const type = req.body?.type || req.body?.topic; // payment
+// Exportação Nomeada (Named Export) da classe
+export class MercadoPagoWebhookController { 
+    constructor(
+        private webhookService: WebhookService,
+        private paymentService: PaymentService,
+        private orderController: OrderController
+    ) {}
 
-    if (type === "payment" && paymentId) {
-       await paymentService.handleMercadoPagoWebhook(String(paymentId));
+    /**
+     * Lida com a requisição do webhook do Mercado Pago.
+     * O middleware 'verifyMercadoPagoSignature' (próximo passo) garante que o body seja autêntico.
+     */
+    async handle(req: Request, res: Response): Promise<Response> {
+        // req.body está em JSON neste ponto, graças ao middleware verifyMercadoPagoSignature.
+        const payload = req.body as WebhookPayload; 
+
+        if (!payload || !payload.topic || !payload.data || !payload.data.id) {
+             throw new AppError("Payload de webhook inválido: faltando topic ou data.id", 400);
+        }
+
+        // O corpo RAW (Buffer) é passado pelo middleware raw() e está disponível em req.body no início do pipeline.
+        // Se a assinatura foi validada, podemos confiar que a origem é do Mercado Pago.
+        
+        try {
+            // A lógica principal (idempotência, busca de status, atualização de DB) é do Service.
+            await this.webhookService.processWebhook(payload, null); // O Service usa a lógica de buscar status real
+
+            // Retorna 204 No Content. O Mercado Pago espera um 200/204 para saber que a notificação foi recebida.
+            return res.status(204).send();
+
+        } catch (error) {
+            console.error("Error processing Mercado Pago webhook:", error);
+            // Retorna 500 para que o MP tente reenviar o webhook mais tarde.
+            return res.status(500).json({ 
+                success: false, 
+                message: "Internal webhook processing error. Will retry later." 
+            });
+        }
     }
-
-    // SEMPRE retorne 200 para o Mercado Pago, senão eles reenviam a notificação
-    return res.status(200).json({ received: true });
-
-  } catch (error) {
-    console.error("Webhook error:", error);
-    // Mesmo com erro interno, retornamos 200 ou 500? 
-    // Se retornar 500, o MP tenta de novo. Se for erro de código, melhor 200 para parar o loop.
-    return res.status(500).json({ error: "Server error" });
-  }
 }

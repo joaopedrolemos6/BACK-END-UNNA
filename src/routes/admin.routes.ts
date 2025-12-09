@@ -1,71 +1,44 @@
+// src/routes/admin.routes.ts
+
 import { Router } from "express";
-import multer from "multer";
-
-// Importe sua config de upload
-import uploadConfig from "../config/upload";
-
-// Importe suas controllers e services (ajuste os caminhos conforme sua estrutura)
-import { ProductImageController } from "../controllers/ProductImageController";
-import { ProductController } from "../controllers/ProductController"; // Importado ProductController
-import { CategoryController } from "../controllers/CategoryController"; // Importado CategoryController
-import { OrderController } from "../controllers/OrderController"; // Importado OrderController
-import { ProductService } from "../services/ProductService";
-import { ProductRepository } from "../repositories/mysql/ProductRepository";
+// Importamos a instância 'upload' (que é o multer configurado com diskStorage)
+import { upload } from "../config/upload"; 
+import { 
+    productController, 
+    categoryController, 
+    orderController, 
+    productImageController // Controlador de Imagem garantido pelo factories
+} from "./factories";
 import { ensureAuthenticated } from "../middlewares/ensureAuthenticated";
 import { ensureAdmin } from "../middlewares/ensureAdmin";
-import { categoryController, productController, orderController } from "./factories"; // Importando as factories
 
 const adminRoutes = Router();
 
-// Configura o Multer
-const upload = multer(uploadConfig);
-
-// As instâncias dos controllers (productController, categoryController, orderController) 
-// já vêm do arquivo factories.ts importado acima.
-
-// Aplicando middlewares de autenticação e Admin para todas as rotas de admin
+// Aplica autenticação e autorização de admin para todas as rotas admin
 adminRoutes.use(ensureAuthenticated, ensureAdmin);
 
+// Rotas de Produtos (CRUD)
+adminRoutes.post("/products", productController.create);
+adminRoutes.get("/products", productController.list);
+adminRoutes.put("/products/:id", productController.update);
+adminRoutes.delete("/products/:id", productController.delete);
 
-// ==========================================================
-// ROTAS DE CATEGORIA (ADMIN)
-// ==========================================================
-// POST /api/admin/categories
-adminRoutes.post("/categories", categoryController.create);
-// PUT /api/admin/categories/:id
-adminRoutes.put("/categories/:id", categoryController.update);
-// DELETE /api/admin/categories/:id
-adminRoutes.delete("/categories/:id", categoryController.delete);
-
-
-// ==========================================================
-// ROTAS DE PRODUTO (ADMIN)
-// ==========================================================
-// POST /api/admin/products
-adminRoutes.post("/products", productController.create); // Cria produto (sem imagem)
-// PUT /api/admin/products/:id
-adminRoutes.put("/products/:id", productController.update); // Atualiza dados do produto
-// DELETE /api/admin/products/:id
-adminRoutes.delete("/products/:id", productController.delete); // Deleta produto
-
-
-// ==========================================================
-// ROTA DE UPLOAD DE IMAGEM (JÁ EXISTENTE, mas melhor usar a factory)
-// POST /api/admin/products/:id/images
+// Rota de Upload de Imagem (Ponto 2.4 Corrigido)
+// Chamamos o método .single('image') do objeto 'upload' para criar o middleware on-the-fly
 adminRoutes.post(
   "/products/:id/images",
-  upload.single("image"), // 'image' é o nome do campo
-  productController.uploadImage // Usando o método do ProductController
+  upload.single("image"), // <-- Uso correto do middleware multer/upload
+  productImageController.upload // O callback que armazena no DB
 );
 
+// Rotas de Categorias (CRUD)
+adminRoutes.post("/categories", categoryController.create);
+adminRoutes.get("/categories", categoryController.list);
+adminRoutes.put("/categories/:id", categoryController.update);
+adminRoutes.delete("/categories/:id", categoryController.delete);
 
-// ==========================================================
-// ROTAS DE PEDIDOS (ADMIN)
-// ==========================================================
-// GET /api/admin/orders
-adminRoutes.get("/orders", orderController.listAdminOrders);
-// PATCH /api/admin/orders/:id/status (ex: para "SENT" ou "DELIVERED")
-adminRoutes.patch("/orders/:id/status", orderController.updateOrderStatus);
+// Rotas de Pedidos
+adminRoutes.get("/orders", orderController.listAllOrders);
+adminRoutes.put("/orders/:id/status", orderController.updateStatus);
 
-
-export { adminRoutes };
+export default adminRoutes;

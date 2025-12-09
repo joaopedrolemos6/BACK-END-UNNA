@@ -1,20 +1,23 @@
-import { createPool } from 'mysql2/promise';
-import { env } from './env';
+// src/config/database.ts
 
-export const pool = createPool({
-  host: env.DATABASE_HOST,
-  port: env.DATABASE_PORT,
-  user: env.DATABASE_USER,
-  password: env.DATABASE_PASSWORD,
-  database: env.DATABASE_NAME,
+import mysql from "mysql2/promise"; 
+import env from "./env"; 
+
+// Configuração do Pool de Conexões MySQL
+// É a maneira correta para um backend de e-commerce que precisa gerenciar várias requisições.
+export const pool = mysql.createPool({
+  // CORREÇÃO: Usando os nomes padronizados (DB_HOST, DB_USER, etc.)
+  host: env.DB_HOST,
+  user: env.DB_USER,
+  password: env.DB_PASSWORD,
+  database: env.DB_NAME,
+  port: env.DB_PORT,
+  
+  // Opções de Pool recomendadas
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
 });
 
-// Helper opcional para checar conexão na subida da app
-export async function testDatabaseConnection() {
-  const connection = await pool.getConnection();
-  await connection.ping();
-  connection.release();
-}
+// Nota: A variável DB_PASSWORD é opcional no seu schema do Zod, 
+// o que é bom para ambientes sem senha (como testes ou dev local sem Docker).

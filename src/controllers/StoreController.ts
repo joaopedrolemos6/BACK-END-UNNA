@@ -14,3 +14,5 @@ export class StoreController {
     return res.json(store);
   };
 }
+
+export const storeController = new StoreController(new StoreService());
